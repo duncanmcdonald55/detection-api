@@ -1,8 +1,16 @@
 from flask import request, jsonify, Flask
+from datetime import datetime
 
 app = Flask(__name__)
 
 detections = []
+
+def verify_date(date):
+    try:
+        parsed_date = datetime.strptime(date, "%Y-%m-%d")
+        return parsed_date
+    except ValueError:
+        return None
 
 def find_detection_by_id(det_id):
     for detection in detections:
@@ -46,9 +54,13 @@ def detection_analysis():
         status = data["status"]
         return jsonify({"error": f"{status} is not a valid status"}), 400
     
+    date = verify_date(data["date"])
+    if not date:
+        return jsonify({"error": "not a valid date, must be in format of YYYY-mm-dd"}), 400
+    
     det_id = max((d["id"] for d in detections), default=0) + 1
     
-    new_detection = {"id": det_id, "date": data["date"], "confidence": conf, "status": data["status"], "notes": data.get("notes", "")}
+    new_detection = {"id": det_id, "date": date, "confidence": conf, "status": data["status"], "notes": data.get("notes", "")}
 
     detections.append(new_detection)
     return jsonify(new_detection), 201
