@@ -1,9 +1,34 @@
 from flask import request, jsonify, Flask
+from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
-detections = []
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL","postgresql://postgres:postgres@db:5432/fertility_db")
+app.config["SQL_TRACK_MODIFICATIONS"] = False
+
+db = SQLAlchemy(app)
+
+class Detections(db.Model):
+    __tablename__ = "detections"
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(30), nullable=False)
+    confidence = db.Column(db.Float, nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+    notes = db.Column(db.Text, default="")
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "date": self.date,
+            "confidence": self.confidence,
+            "status": self.status,
+            "notes": self.notes
+        }
+
+with app.app_context():
+    db.create_all()
 
 def verify_date(date):
     try:
@@ -11,12 +36,6 @@ def verify_date(date):
         return parsed_date
     except ValueError:
         return None
-
-def find_detection_by_id(det_id):
-    for detection in detections:
-        if detection["id"] == det_id:
-            return detection
-    return None
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -26,7 +45,8 @@ def health():
 def detection_analysis():
 
     if request.method == 'GET':
-        return jsonify(detections), 200
+        dets = Detections.query.all()
+        return jsonify([d.to_dict() for d in dets]), 200
     
     if not request.is_json:
         return jsonify({"error": "must be in json format"}), 415
@@ -58,20 +78,19 @@ def detection_analysis():
     if not date:
         return jsonify({"error": "not a valid date, must be in format of YYYY-mm-dd"}), 400
     
-    det_id = max((d["id"] for d in detections), default=0) + 1
+    notes = data.get("notes","")
     
-    new_detection = {"id": det_id, "date": date, "confidence": conf, "status": data["status"], "notes": data.get("notes", "")}
-
-    detections.append(new_detection)
-    return jsonify(new_detection), 201
+    
+    new_detection = Detections(date=date, confidence=conf, status = data["status"], notes=notes)
+    db.session.add(new_detection)
+    db.session.commit()
+    return jsonify(new_detection.to_dict()), 201
 
 @app.route("/detections/<int:det_id>", methods=["GET"])
 def get_detection(det_id):
-    detection = find_detection_by_id(det_id)
-
-    if not detection:
-        return jsonify({"error":f"detection with id of {det_id} not found"}), 404
-    return jsonify(detection), 200
+    detection = db.get_or_404(Detections, det_id)
+    return jsonify(detection.to_dict()), 200
+    
 
 if __name__ == '__main__':
     app.run(debug=True, host="0.0.0.0", port=5000)
